@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:houbago/houbago/houbago_theme.dart';
+import 'package:houbago/houbago/database/database_service.dart';
 import 'package:image_picker/image_picker.dart';
 
 enum DriverType { moto, car }
@@ -130,8 +131,10 @@ class _DriverFormState extends State<DriverForm> {
   final _lastNameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _confirmPhoneController = TextEditingController();
-  File? _registrationImage;
-  File? _licenseImage;
+  XFile? _registrationImage;
+  XFile? _licenseImage;
+  bool _isLoading = false;
+  String? _errorMessage;
 
   Future<void> _pickImage(ImageSource source, bool isRegistration) async {
     try {
@@ -140,13 +143,13 @@ class _DriverFormState extends State<DriverForm> {
 
       setState(() {
         if (isRegistration) {
-          _registrationImage = File(image.path);
+          _registrationImage = image;
         } else {
-          _licenseImage = File(image.path);
+          _licenseImage = image;
         }
       });
     } catch (e) {
-      // Gérer l'erreur
+      print('Erreur lors de la sélection de l\'image: $e');
     }
   }
 
@@ -178,6 +181,94 @@ class _DriverFormState extends State<DriverForm> {
         ),
       ),
     );
+  }
+
+  Future<String> _uploadImage(XFile image) async {
+    try {
+      // Upload l'image dans le dossier 'drivers'
+      return await DatabaseService.uploadImage(image, 'drivers');
+    } catch (e) {
+      print('Erreur lors de l\'upload de l\'image: $e');
+      throw Exception('Erreur lors de l\'upload de l\'image');
+    }
+  }
+
+  Future<void> _submitForm() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_registrationImage == null || _licenseImage == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Veuillez sélectionner les deux images'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      print('\n=== Enregistrement d\'un chauffeur ===');
+      
+      // Upload des images
+      print('Upload de la photo...');
+      final photoUrl = await DatabaseService.uploadImage(_registrationImage!, 'profile-photos');
+      print('Photo URL: $photoUrl');
+      
+      print('Upload de la carte d\'identité...');
+      final idCardUrl = await DatabaseService.uploadImage(_licenseImage!, 'id-cards');
+      print('ID Card URL: $idCardUrl');
+
+      // Enregistrer l'affilié
+      print('Enregistrement de l\'affilié...');
+      final success = await DatabaseService.registerAffiliate(
+        firstname: _firstNameController.text,
+        lastname: _lastNameController.text,
+        phone: _phoneController.text,
+        photoUrl: photoUrl,
+        idCardUrl: idCardUrl,
+      );
+
+      if (!mounted) return;
+
+      if (success) {
+        // Fermer le formulaire
+        Navigator.pop(context);
+        
+        // Afficher le message de succès
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Votre demande a été envoyée avec succès'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        throw Exception('Erreur lors de l\'enregistrement de l\'affilié');
+      }
+    } catch (e) {
+      print('Erreur: $e');
+      if (!mounted) return;
+      
+      setState(() {
+        _errorMessage = 'Une erreur est survenue: $e';
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erreur: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   @override
@@ -286,52 +377,13 @@ class _DriverFormState extends State<DriverForm> {
               ),
               const SizedBox(height: 24),
               ElevatedButton(
-                onPressed: () {
-                  if (_formKey.currentState?.validate() ?? false) {
-                    if (_registrationImage == null || _licenseImage == null) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Veuillez ajouter les deux photos requises'),
-                        ),
-                      );
-                      return;
-                    }
-                    // TODO: Soumettre le formulaire
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Row(
-                          children: [
-                            const Icon(
-                              Icons.check_circle,
-                              color: Colors.white,
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              'Votre demande a été envoyée',
-                              style: HoubagoTheme.textTheme.bodyMedium?.copyWith(
-                                color: Colors.white,
-                              ),
-                            ),
-                          ],
-                        ),
-                        backgroundColor: Colors.green,
-                        duration: const Duration(seconds: 3),
-                        behavior: SnackBarBehavior.floating,
-                        margin: const EdgeInsets.all(16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    );
-                  }
-                },
+                onPressed: _isLoading ? null : _submitForm,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: HoubagoTheme.primary,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
                 child: Text(
-                  'Enregistrer',
+                  _isLoading ? 'En cours...' : 'Enregistrer',
                   style: HoubagoTheme.textTheme.titleMedium?.copyWith(
                     color: HoubagoTheme.textLight,
                   ),
@@ -362,7 +414,7 @@ class _ImagePickerButton extends StatelessWidget {
   });
 
   final String label;
-  final File? image;
+  final XFile? image;
   final VoidCallback onTap;
 
   @override
@@ -376,7 +428,7 @@ class _ImagePickerButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           image: image != null
               ? DecorationImage(
-                  image: FileImage(image!),
+                  image: FileImage(File(image!.path)),
                   fit: BoxFit.cover,
                 )
               : null,
