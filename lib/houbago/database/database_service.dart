@@ -37,6 +37,11 @@ class DatabaseService {
       
       // Exécuter les migrations
       await runMigrations();
+      
+      // Vérifier les utilisateurs
+      await checkUsers();
+      
+      print('Initialisation terminée avec succès');
     } catch (e) {
       print('Erreur lors de l\'initialisation de Supabase: $e');
       rethrow;
@@ -89,7 +94,7 @@ class DatabaseService {
       final admin = await _supabase
           .from('admins')
           .select()
-          .eq('phone', '+225 0652262798')
+          .eq('phone', '0652262798')
           .maybeSingle();
 
       print('Admin existant: $admin');
@@ -99,7 +104,7 @@ class DatabaseService {
         await _supabase.from('admins').insert({
           'first_name': 'Admin',
           'last_name': 'Houbago',
-          'phone': '+225 0652262798',
+          'phone': '0652262798',
           'pin': '0909',
           'created_at': DateTime.now().toIso8601String(),
           'updated_at': DateTime.now().toIso8601String(),
@@ -151,10 +156,13 @@ class DatabaseService {
     }
   }
 
-  static Future<HoubagoUser?> signInWithPhoneAndPin(String phone, String pin) async {
+  static Future<bool> signInWithPhone(String phone, String pin) async {
     try {
+      // Normaliser le numéro de téléphone
+      final normalizedPhone = _normalizePhoneNumber(phone);
+      
       print('\n=== Tentative de connexion ===');
-      print('Téléphone: $phone');
+      print('Téléphone normalisé: $normalizedPhone');
       print('PIN: $pin');
 
       // Vérifier le contenu des tables
@@ -170,7 +178,7 @@ class DatabaseService {
         final adminResponse = await _supabase
             .from('admins')
             .select()
-            .eq('phone', phone)
+            .eq('phone', normalizedPhone)
             .eq('pin', pin)
             .maybeSingle();
 
@@ -180,12 +188,13 @@ class DatabaseService {
           print('Admin trouvé: $adminResponse');
           _currentUser = HoubagoUser(
             id: adminResponse['id'],
-            firstname: adminResponse['first_name'] ?? 'Admin',
-            lastname: adminResponse['last_name'] ?? 'Houbago',
-            phone: phone,
+            firstName: adminResponse['first_name'] ?? 'Admin',
+            lastName: adminResponse['last_name'] ?? 'Houbago',
+            phone: normalizedPhone,
             balance: 0,
+            createdAt: DateTime.parse(adminResponse['created_at']),
           );
-          return _currentUser;
+          return true;
         }
       } catch (e) {
         print('Erreur connexion admin: $e');
@@ -197,7 +206,7 @@ class DatabaseService {
         final userResponse = await _supabase
             .from('users')
             .select()
-            .eq('phone', phone)
+            .eq('phone', normalizedPhone)
             .eq('pin', pin)
             .maybeSingle();
 
@@ -207,26 +216,23 @@ class DatabaseService {
           print('Utilisateur trouvé: $userResponse');
           _currentUser = HoubagoUser(
             id: userResponse['id'],
-            firstname: userResponse['first_name'] ?? '',
-            lastname: userResponse['last_name'] ?? '',
-            phone: phone,
-            balance: 0,
+            firstName: userResponse['first_name'],
+            lastName: userResponse['last_name'],
+            phone: normalizedPhone,
+            balance: userResponse['balance'] ?? 0.0,
+            createdAt: DateTime.parse(userResponse['created_at']),
           );
-          return _currentUser;
+          return true;
         }
       } catch (e) {
         print('Erreur connexion utilisateur: $e');
       }
 
-      // Si on arrive ici, ni admin ni utilisateur trouvé
-      print('Aucun compte trouvé avec ces identifiants');
-      return null;
-
-    } catch (e, stackTrace) {
-      print('Erreur lors de la connexion:');
-      print('Error: $e');
-      print('Stack trace: $stackTrace');
-      return null;
+      print('Aucun utilisateur ou admin trouvé avec ces identifiants');
+      return false;
+    } catch (e) {
+      print('Erreur lors de la connexion: $e');
+      return false;
     }
   }
 
@@ -369,10 +375,11 @@ class DatabaseService {
       if (response != null) {
         _currentUser = HoubagoUser(
           id: response['id'],
-          firstname: response['first_name'],
-          lastname: response['last_name'],
+          firstName: response['first_name'],
+          lastName: response['last_name'],
           phone: phone,
           balance: 0,
+          createdAt: DateTime.parse(response['created_at']),
         );
 
         print('Utilisateur créé: ${_currentUser?.toJson()}');
@@ -520,7 +527,7 @@ class DatabaseService {
       final testUser = await _supabase
           .from('users')
           .select()
-          .eq('phone', '+225 0123456789')
+          .eq('phone', '0123456789')
           .maybeSingle();
 
       print('insertTestData - testUser: $testUser');
@@ -532,7 +539,7 @@ class DatabaseService {
             .insert({
               'firstname': 'John',
               'lastname': 'Doe',
-              'phone': '+225 0123456789',
+              'phone': '0123456789',
               'pin': '1234',
               'balance': 0.0,
               'created_at': DateTime.now().toIso8601String(),
@@ -719,36 +726,30 @@ class DatabaseService {
     required String affiliateId,
     required String status,
   }) async {
-    try {
-      final response = await _supabase
-          .from('affiliates')
-          .update({'status': status})
-          .eq('id', affiliateId)
-          .select();
-      
-      print('Update affiliate status response: $response');
-      
-      // Récupérer les détails de l'affilié
-      final affiliate = await _supabase
-          .from('affiliates')
-          .select()
-          .eq('id', affiliateId)
-          .single();
-      
-      // Créer une notification pour l'utilisateur
-      await _supabase.from('notifications').insert({
-        'user_id': affiliate['user_id'],
-        'title': 'Statut mis à jour',
-        'message': 'Le statut de votre chauffeur a été mis à jour à $status',
-        'type': 'affiliate_status_update',
-        'data': {'status': status},
-        'created_at': DateTime.now().toIso8601String(),
-      });
-    } catch (e, stackTrace) {
-      print('Error updating affiliate status: $e');
-      print('Stack trace: $stackTrace');
-      rethrow;
-    }
+    final response = await _supabase
+        .from('affiliates')
+        .update({'status': status})
+        .eq('id', affiliateId)
+        .select();
+    
+    print('Update affiliate status response: $response');
+    
+    // Récupérer les détails de l'affilié
+    final affiliate = await _supabase
+        .from('affiliates')
+        .select()
+        .eq('id', affiliateId)
+        .single();
+    
+    // Créer une notification pour l'utilisateur
+    await _supabase.from('notifications').insert({
+      'user_id': affiliate['user_id'],
+      'title': 'Statut mis à jour',
+      'message': 'Le statut de votre chauffeur a été mis à jour à $status',
+      'type': 'affiliate_status_update',
+      'data': {'status': status},
+      'created_at': DateTime.now().toIso8601String(),
+    });
   }
 
   static Future<List<Affiliate>> getPendingAffiliates() async {
@@ -772,139 +773,118 @@ class DatabaseService {
     }
   }
 
-  static Future<List<Map<String, dynamic>>> getAdminAffiliates() async {
-    final currentAdmin = _currentUser;
-    if (currentAdmin == null) {
-      throw Exception('Admin non connecté');
-    }
-
-    final response = await _supabase
-        .from('affiliates')
-        .select('''
-          *,
-          sponsor:user_id (
-            firstname,
-            lastname,
-            phone
-          )
-        ''')
-        .order('created_at', ascending: false);
-
-    return response;
-  }
-
-  static Stream<List<PendingAffiliate>> getPendingAffiliatesAdmin() {
+  static Stream<List<PendingWithdrawal>> getPendingWithdrawals() {
     try {
       return _supabase
-          .from('affiliates')
+          .from('withdrawals')
           .stream(primaryKey: ['id'])
           .eq('status', 'pending')
-          .map((list) {
-        print('Received affiliates data: $list'); // Debug
-        return list
-            .map((data) => PendingAffiliate(
-                  id: data['id'] as String,
-                  userId: data['user_id'] as String,
-                  firstname: data['firstname'] as String,
-                  lastname: data['lastname'] as String,
-                  phone: data['phone'] as String,
-                  status: data['status'] as String,
-                  createdAt: DateTime.parse(data['created_at'] as String),
-                ))
-            .toList();
-      });
-    } catch (e, stackTrace) {
-      print('Error getting pending affiliates: $e');
-      print('Stack trace: $stackTrace');
+          .map((data) {
+            print('Données de retrait reçues: $data');
+            return data.map((json) => PendingWithdrawal.fromJson(json)).toList();
+          });
+    } catch (e) {
+      print('Erreur lors de la récupération des retraits en attente: $e');
+      return Stream.value([]);
+    }
+  }
+
+  static Future<void> updateWithdrawalStatus(String withdrawalId, String status) async {
+    try {
+      // Récupérer les détails du retrait
+      final withdrawal = await _supabase
+          .from('withdrawals')
+          .select('*, users!inner(*)')
+          .eq('id', withdrawalId)
+          .single();
+
+      // Mettre à jour le statut
+      await _supabase
+          .from('withdrawals')
+          .update({
+            'status': status,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', withdrawalId);
+
+      // Si le retrait est effectué, notifier l'utilisateur
+      if (status == 'completed') {
+        // Débiter le compte de l'utilisateur
+        final userId = withdrawal['user_id'];
+        final amount = withdrawal['amount'];
+        
+        await _supabase.rpc('debit_user_balance', params: {
+          'user_id': userId,
+          'amount': amount,
+        });
+
+        // Envoyer une notification à l'utilisateur
+        await _supabase.from('notifications').insert({
+          'user_id': userId,
+          'title': 'Retrait effectué',
+          'message': 'Votre retrait de ${amount.toStringAsFixed(2)} € a été effectué.',
+          'type': 'withdrawal_completed',
+          'data': {
+            'withdrawal_id': withdrawalId,
+            'amount': amount,
+          },
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      }
+    } catch (e) {
+      print('Erreur lors de la mise à jour du statut du retrait: $e');
       rethrow;
     }
   }
 
-  static Stream<List<PendingWithdrawal>> getPendingWithdrawals() {
-    return _supabase
-        .from('withdrawals')
-        .stream(primaryKey: ['id'])
-        .eq('status', 'pending')
-        .order('created_at')
-        .map((data) => data
-            .map((json) => PendingWithdrawal.fromJson(json))
-            .toList());
-  }
-
-  static Future<void> updateAffiliateStatusAdmin({
-    required String affiliateId,
-    required String status,
-  }) async {
-    final currentAdmin = _currentUser;
-    if (currentAdmin == null) {
-      throw Exception('Admin non connecté');
-    }
-
-    await _supabase.from('affiliates').update({
-      'status': status,
-      'admin_id': currentAdmin.id,
-      'updated_at': DateTime.now().toIso8601String(),
-    }).eq('id', affiliateId);
-
-    // Récupérer les informations de l'affilié
-    final affiliate = await _supabase
-        .from('affiliates')
-        .select('*, sponsor:user_id(*)')
-        .eq('id', affiliateId)
-        .single();
-
-    // Créer une notification pour le parrain
-    await _supabase.from('notifications').insert({
-      'user_id': affiliate['sponsor_id'],
-      'title': 'Statut du chauffeur mis à jour',
-      'message': '''
-Le statut de votre chauffeur ${affiliate['firstname']} ${affiliate['lastname']} a été mis à jour à "${status == 'active' ? 'Actif' : 'Refusé'}"
-''',
-      'type': 'driver_status_update',
-      'created_at': DateTime.now().toIso8601String(),
-    });
-  }
-
-  static Future<void> updateWithdrawalStatus(String id, String status) async {
-    await _supabase
-        .from('withdrawals')
-        .update({
-          'status': status,
-          'admin_id': _currentUser?.id,
-          'processed_at': DateTime.now().toIso8601String(),
-        })
-        .eq('id', id);
-  }
-
-  static Future<void> createSupportRequest({
-    required String subject,
-    required String message,
-    String? audioUrl,
-  }) async {
-    final user = _currentUser;
-    if (user == null) {
+  static Future<void> createWithdrawalRequest(double amount) async {
+    final userId = await getCurrentUserId();
+    if (userId == null) {
       throw Exception('Utilisateur non connecté');
     }
 
-    final supportRequest = await _supabase
-        .from('support_requests')
-        .insert({
-          'user_id': user.id,
-          'subject': subject,
-          'message': message,
-          'audio_url': audioUrl,
-          'created_at': DateTime.now().toIso8601String(),
-        })
-        .select()
-        .single();
+    try {
+      // Récupérer les informations de l'utilisateur
+      final userInfo = await _supabase
+          .from('users')
+          .select()
+          .eq('id', userId)
+          .single();
 
-    // Créer une notification pour l'administrateur
-    await _createAdminNotification(
-      title: 'Nouvelle demande de support',
-      message: '''De: ${user.phone}
-Sujet: $subject''',
-      type: 'new_support_request',
-    );
+      // Créer la demande de retrait
+      final withdrawalId = const Uuid().v4();
+      final now = DateTime.now().toIso8601String();
+      
+      await _supabase.from('withdrawals').insert({
+        'id': withdrawalId,
+        'user_id': userId,
+        'amount': amount,
+        'status': 'pending',
+        'created_at': now,
+      });
+
+      // Envoyer une notification à tous les admins
+      final admins = await _supabase.from('admins').select('id');
+      for (final admin in admins) {
+        await _supabase.from('admin_notifications').insert({
+          'user_id': admin['id'],
+          'title': 'Nouvelle demande de retrait',
+          'message': 'Demande de retrait de ${userInfo['first_name']} ${userInfo['last_name']} pour un montant de ${amount.toStringAsFixed(2)} €',
+          'type': 'withdrawal_request',
+          'data': {
+            'withdrawal_id': withdrawalId,
+            'user_id': userId,
+            'user_name': '${userInfo['first_name']} ${userInfo['last_name']}',
+            'amount': amount,
+            'created_at': now,
+          },
+          'created_at': now,
+        });
+      }
+    } catch (e) {
+      print('Erreur lors de la création de la demande de retrait: $e');
+      rethrow;
+    }
   }
 
   static Stream<List<SupportRequest>> getSupportRequests() {
@@ -918,395 +898,23 @@ Sujet: $subject''',
   }
 
   static Future<void> updateSupportRequest(
-    String id, {
+    String requestId, {
     String? status,
     String? adminResponse,
   }) async {
-    final updates = <String, dynamic>{
-      if (status != null) 'status': status,
-      if (adminResponse != null) 'admin_response': adminResponse,
-      'admin_id': _currentUser?.id,
-      'updated_at': DateTime.now().toIso8601String(),
-    };
-
-    await _supabase
-        .from('support_requests')
-        .update(updates)
-        .eq('id', id);
-  }
-
-  static Future<bool> requestPayment({required double amount}) async {
     try {
-      final userId = _currentUser?.id;
-      if (userId == null) return false;
+      final updates = {
+        if (status != null) 'status': status,
+        if (adminResponse != null) 'admin_response': adminResponse,
+        'updated_at': DateTime.now().toIso8601String(),
+      };
 
-      // Vérifier que le montant ne dépasse pas le solde
-      if (amount > (_currentUser?.balance ?? 0)) {
-        return false;
-      }
-
-      // Créer la demande de paiement
-      await _supabase.from('payment_requests').insert({
-        'user_id': userId,
-        'amount': amount,
-        'created_at': DateTime.now().toIso8601String(),
-      });
-
-      // Créer une notification
-      await _supabase.from('notifications').insert({
-        'user_id': userId,
-        'title': 'Demande de paiement',
-        'message': 'Votre demande de paiement de ${amount.toStringAsFixed(2)} FCFA a été envoyée. Nous la traiterons dans les plus brefs délais.',
-        'created_at': DateTime.now().toIso8601String(),
-      });
-
-      return true;
-    } catch (e) {
-      print('Erreur lors de la demande de paiement: $e');
-      return false;
-    }
-  }
-
-  static Future<bool> requestWithdrawal({required double amount}) async {
-    try {
-      final userId = _currentUser?.id;
-      if (userId == null) return false;
-
-      // Vérifier que le montant ne dépasse pas le solde
-      if (amount > (_currentUser?.balance ?? 0)) {
-        return false;
-      }
-
-      // Créer la demande de retrait
-      await _supabase.from('withdrawals').insert({
-        'user_id': userId,
-        'amount': amount,
-        'created_at': DateTime.now().toIso8601String(),
-      });
-
-      // Créer une notification
-      await _supabase.from('notifications').insert({
-        'user_id': userId,
-        'title': 'Demande de retrait',
-        'message': 'Votre demande de retrait de ${amount.toStringAsFixed(2)} FCFA a été envoyée. Nous la traiterons dans les plus brefs délais.',
-        'created_at': DateTime.now().toIso8601String(),
-      });
-
-      return true;
-    } catch (e) {
-      print('Erreur lors de la demande de retrait: $e');
-      return false;
-    }
-  }
-
-  static Future<bool> signInAsAdmin({
-    required String phone,
-    required String pin,
-  }) async {
-    try {
-      print('\n=== Tentative de connexion admin ===');
-      print('Téléphone: $phone');
-      print('PIN: $pin');
-
-      // Vérifier d'abord la structure de la table
-      print('\n=== Vérification de la structure de la table admins ===');
-      final tableData = await _supabase
-          .from('admins')
-          .select()
-          .limit(1);
-      print('Structure de la table: $tableData');
-
-      // Faire la requête de connexion
-      print('\n=== Requête de connexion admin ===');
-      final response = await _supabase
-          .from('admins')
-          .select()
-          .eq('phone', phone)
-          .eq('pin', pin)
-          .single();
-
-      print('Response data: $response');
-
-      if (response == null) {
-        print('Aucun admin trouvé avec ces identifiants');
-        return false;
-      }
-
-      // Stocker les informations de l'admin
-      print('Données admin trouvées: $response');
-      
-      _currentUser = HoubagoUser(
-        id: response['id'],
-        firstname: response['first_name'],
-        lastname: response['last_name'],
-        phone: phone,
-        balance: 0,
-      );
-      
-      print('Admin connecté avec succès:');
-      print('- Admin: ${_currentUser?.toJson()}');
-      
-      return true;
-    } catch (e, stackTrace) {
-      print('Erreur lors de la connexion admin: $e');
-      print('Stack trace: $stackTrace');
-      return false;
-    }
-  }
-
-  static Future<bool> checkIsAdmin() async {
-    try {
-      final admin = await _supabase
-          .from('admins')
-          .select()
-          .eq('phone', '+225 0652262798')
-          .eq('pin', '0909')
-          .maybeSingle();
-
-      return admin != null;
-    } catch (e) {
-      print('Erreur lors de la vérification admin: $e');
-      return false;
-    }
-  }
-
-  static Future<bool> isCurrentUserAdmin() async {
-    try {
-      if (_currentUser == null) return false;
-
-      final admin = await _supabase
-          .from('admins')
-          .select()
-          .eq('phone', _currentUser?.phone)
-          .eq('pin', '0909')
-          .maybeSingle();
-
-      return admin != null;
-    } catch (e) {
-      print('Erreur lors de la vérification admin: $e');
-      return false;
-    }
-  }
-
-  static Future<bool> isCurrentUserSponsor() async {
-    // Tout le monde est sponsor
-    return true;
-  }
-
-  static Future<void> setCurrentUserAsSponsor() async {
-    // Ne rien faire, tout le monde est sponsor
-    return;
-  }
-
-  static Future<void> debugCheckTableStructure() async {
-    try {
-      print('\n=== Vérification de la structure de la table ===');
-      final result = await supabase.rpc('get_table_info', params: {'table_name': 'affiliates'});
-      print('Colonnes de la table affiliates:');
-      for (var column in result) {
-        print('${column['column_name']}: ${column['data_type']}');
-      }
-    } catch (e) {
-      print('Erreur lors de la vérification de la structure: $e');
-    }
-  }
-
-  static Future<bool> registerAffiliate({
-    required String firstname,
-    required String lastname,
-    required String phone,
-    required String photoUrl,
-    required String idCardUrl,
-  }) async {
-    try {
-      print('\n=== Enregistrement d\'un affilié ===');
-      print('Prénom: $firstname');
-      print('Nom: $lastname');
-      print('Téléphone: $phone');
-      print('Photo URL: $photoUrl');
-      print('ID Card URL: $idCardUrl');
-
-      // Vérifier la structure de la table avant l'insertion
-      await debugCheckTableStructure();
-
-      final response = await supabase.from('affiliates').insert({
-        'first_name': firstname,
-        'last_name': lastname,
-        'phone': phone,
-        'photo_identity_url': photoUrl,
-        'photo_license_url': idCardUrl,
-        'status': 'pending',
-        'driver_type': 'moto', // ou 'car' selon le type
-      }).select();
-
-      print('Réponse: $response');
-      return true;
-    } catch (e) {
-      print('Erreur lors de l\'enregistrement de l\'affilié: $e');
-      rethrow;
-    }
-  }
-
-  static Future<void> debugCheckPendingAffiliates() async {
-    try {
-      final response = await _supabase
-          .from('affiliates')
-          .select()
-          .eq('status', 'pending');
-      
-      print('Pending affiliates:');
-      print(response);
-      
-      // Vérifier aussi la table users pour les détails
-      if (response.isNotEmpty) {
-        for (var affiliate in response) {
-          final userId = affiliate['user_id'];
-          final user = await _supabase
-              .from('users')
-              .select()
-              .eq('id', userId)
-              .single();
-          print('User details for affiliate ${affiliate['id']}:');
-          print(user);
-        }
-      }
-    } catch (e, stackTrace) {
-      print('Error checking pending affiliates: $e');
-      print('Stack trace: $stackTrace');
-    }
-  }
-
-  static Future<void> runMigrations() async {
-    try {
-      print('Running migrations...');
-      
-      // Exécuter les migrations
-      await _supabase.rpc('handle_migrations');
-      
-      print('Migrations completed successfully');
-    } catch (e, stackTrace) {
-      print('Error running migrations: $e');
-      print('Stack trace: $stackTrace');
-      rethrow;
-    }
-  }
-
-  static Future<void> _createAdminNotification({
-    required String title,
-    required String message,
-    required String type,
-  }) async {
-    final admins = await _supabase.from('admins').select('id');
-    
-    for (final admin in admins) {
-      await _supabase.from('admin_notifications').insert({
-        'admin_id': admin['id'],
-        'title': title,
-        'message': message,
-        'type': type,
-        'created_at': DateTime.now().toIso8601String(),
-      });
-    }
-  }
-
-  static Future<List<Map<String, dynamic>>> getAdminNotifications({
-    bool unreadOnly = false,
-  }) async {
-    final currentAdmin = _currentUser;
-    if (currentAdmin == null) {
-      throw Exception('Admin non connecté');
-    }
-
-    var query = _supabase
-        .from('admin_notifications')
-        .select();
-
-    if (unreadOnly) {
-      query = query.match({'read': false});
-    }
-
-    final response = await query
-        .match({'admin_id': currentAdmin.id})
-        .order('created_at', ascending: false);
-
-    return response;
-  }
-
-  static Future<void> markAdminNotificationAsRead(String notificationId) async {
-    final currentAdmin = _currentUser;
-    if (currentAdmin == null) {
-      throw Exception('Admin non connecté');
-    }
-
-    await _supabase
-        .from('admin_notifications')
-        .update({'read': true})
-        .eq('id', notificationId)
-        .eq('admin_id', currentAdmin.id);
-  }
-
-  static Future<String> uploadAudioFile(File file) async {
-    try {
-      final user = _currentUser;
-      if (user == null) {
-        throw Exception('Utilisateur non connecté');
-      }
-
-      final fileName = 'audio_messages/${user.id}/${DateTime.now().millisecondsSinceEpoch}.m4a';
-      final bytes = await file.readAsBytes();
-      
-      // Upload du fichier
       await _supabase
-          .storage
-          .from('support_files')
-          .uploadBinary(fileName, bytes);
-
-      // Récupération de l'URL publique
-      final String audioUrl = _supabase
-          .storage
-          .from('support_files')
-          .getPublicUrl(fileName);
-
-      return audioUrl;
-    } catch (e, stackTrace) {
-      print('Error uploading audio file: $e');
-      print('Stack trace: $stackTrace');
-      rethrow;
-    }
-  }
-
-  static Future<String> uploadImage(XFile file, String bucket) async {
-    try {
-      print('\n=== Upload de l\'image ===');
-      print('Bucket: $bucket');
-      print('Fichier: ${file.path}');
-
-      // Lire le contenu du fichier
-      final bytes = await file.readAsBytes();
-      
-      // Générer un nom unique
-      final fileName = 'image_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      print('Nom du fichier: $fileName');
-      print('Taille: ${bytes.length} bytes');
-
-      // Upload le fichier
-      await supabase.storage.from(bucket).uploadBinary(
-        fileName,
-        bytes,
-        fileOptions: const FileOptions(
-          contentType: 'image/jpeg',
-        ),
-      );
-
-      // Obtenir l'URL publique
-      final url = supabase.storage.from(bucket).getPublicUrl(fileName);
-      print('URL: $url');
-      
-      return url;
-    } catch (e, stackTrace) {
-      print('Erreur lors de l\'upload:');
-      print('Error: $e');
-      print('Stack trace: $stackTrace');
+          .from('support_requests')
+          .update(updates)
+          .eq('id', requestId);
+    } catch (e) {
+      print('Erreur lors de la mise à jour de la demande: $e');
       rethrow;
     }
   }
@@ -1439,6 +1047,579 @@ Sujet: $subject''',
     } catch (e) {
       print('Erreur lors de la vérification utilisateur: $e');
       return false;
+    }
+  }
+
+  static Future<void> runMigrations() async {
+    try {
+      print('Running migrations...');
+      
+      // Créer la fonction SQL si elle n'existe pas
+      await _createSQLFunction();
+      
+      // Vérifier si la table admins existe
+      try {
+        await _supabase.from('admins').select().limit(1);
+        print('Table admins existe déjà');
+      } catch (e) {
+        print('Création de la table admins...');
+        // Créer la table admins si elle n'existe pas
+        await _supabase.rpc('create_admins_table', params: {
+          'sql': '''
+            CREATE TABLE IF NOT EXISTS admins (
+              id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+              first_name TEXT NOT NULL,
+              last_name TEXT NOT NULL,
+              phone TEXT UNIQUE NOT NULL,
+              pin TEXT NOT NULL,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+              updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+            );
+          '''
+        });
+        print('Table admins créée avec succès');
+      }
+      
+      // Créer l'admin par défaut
+      await createAdminIfNeeded();
+      
+      print('Migrations completed successfully');
+    } catch (e, stackTrace) {
+      print('Error running migrations: $e');
+      print('Stack trace: $stackTrace');
+      rethrow;
+    }
+  }
+
+  static Future<void> _createSQLFunction() async {
+    try {
+      print('Création de la fonction SQL create_admins_table...');
+      await _supabase.rpc('create_sql_function', params: {
+        'function_name': 'create_admins_table',
+        'sql': '''
+          CREATE OR REPLACE FUNCTION create_admins_table(sql text)
+          RETURNS void
+          LANGUAGE plpgsql
+          SECURITY DEFINER
+          AS \$\$
+          BEGIN
+            EXECUTE sql;
+          END;
+          \$\$;
+        '''
+      });
+      print('Fonction SQL créée avec succès');
+    } catch (e) {
+      print('Erreur lors de la création de la fonction SQL: $e');
+      // On ignore l'erreur si la fonction existe déjà
+    }
+  }
+
+  static Future<void> _createAdminNotification({
+    required String title,
+    required String message,
+    required String type,
+  }) async {
+    final admins = await _supabase.from('admins').select('id');
+    
+    for (final admin in admins) {
+      await _supabase.from('admin_notifications').insert({
+        'admin_id': admin['id'],
+        'title': title,
+        'message': message,
+        'type': type,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    }
+  }
+
+  static Future<List<Map<String, dynamic>?>?> getAdminNotifications({
+    bool unreadOnly = false,
+  }) async {
+    final currentAdmin = _currentUser;
+    if (currentAdmin == null) {
+      throw Exception('Admin non connecté');
+    }
+
+    var query = _supabase
+        .from('admin_notifications')
+        .select();
+
+    if (unreadOnly) {
+      query = query.match({'read': false});
+    }
+
+    final response = await query
+        .match({'admin_id': currentAdmin.id})
+        .order('created_at', ascending: false);
+
+    return response;
+  }
+
+  static Future<void> markAdminNotificationAsRead(String notificationId) async {
+    final currentAdmin = _currentUser;
+    if (currentAdmin == null) {
+      throw Exception('Admin non connecté');
+    }
+
+    await _supabase
+        .from('admin_notifications')
+        .update({'read': true})
+        .eq('id', notificationId)
+        .eq('admin_id', currentAdmin.id);
+  }
+
+  static Future<String> uploadAudioFile(File file) async {
+    try {
+      final user = _currentUser;
+      if (user == null) {
+        throw Exception('Utilisateur non connecté');
+      }
+
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}.m4a';
+      final bytes = await file.readAsBytes();
+      
+      await _supabase
+          .storage
+          .from('audio_files')
+          .uploadBinary(
+            'user_${user.id}/$fileName',
+            bytes,
+            fileOptions: const FileOptions(
+              contentType: 'audio/m4a',
+            ),
+          );
+
+      final url = _supabase
+          .storage
+          .from('audio_files')
+          .getPublicUrl('user_${user.id}/$fileName');
+
+      return url;
+    } catch (e) {
+      print('Erreur lors de l\'upload du fichier audio: $e');
+      rethrow;
+    }
+  }
+
+  static Future<String> uploadImage(XFile file, String bucket) async {
+    try {
+      print('\n=== Upload de l\'image ===');
+      print('Bucket: $bucket');
+      print('Fichier: ${file.path}');
+
+      // Lire le contenu du fichier
+      final bytes = await file.readAsBytes();
+      
+      // Générer un nom unique
+      final fileName = 'image_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      print('Nom du fichier: $fileName');
+      print('Taille: ${bytes.length} bytes');
+
+      // Upload le fichier
+      await supabase.storage.from(bucket).uploadBinary(
+        fileName,
+        bytes,
+        fileOptions: const FileOptions(
+          contentType: 'image/jpeg',
+        ),
+      );
+
+      // Obtenir l'URL publique
+      final url = supabase.storage.from(bucket).getPublicUrl(fileName);
+      print('URL: $url');
+      
+      return url;
+    } catch (e) {
+      print('Erreur lors de l\'upload:');
+      print('Error: $e');
+      rethrow;
+    }
+  }
+
+  static String _normalizePhoneNumber(String phone) {
+    // Retirer les espaces et le préfixe +225 s'il existe
+    return phone.replaceAll('+225 ', '').replaceAll(' ', '');
+  }
+
+  static Future<bool> signInAsAdmin({
+    required String phone,
+    required String pin,
+  }) async {
+    try {
+      print('\n=== Tentative de connexion admin ===');
+      print('Téléphone: $phone');
+      print('PIN: $pin');
+
+      // Vérifier d'abord la structure de la table
+      print('\n=== Vérification de la structure de la table admins ===');
+      final tableData = await _supabase
+          .from('admins')
+          .select()
+          .limit(1);
+      print('Structure de la table: $tableData');
+
+      // Normaliser le numéro de téléphone
+      final normalizedPhone = _normalizePhoneNumber(phone);
+      
+      print('\n=== Requête de connexion admin ===');
+      print('Numéro normalisé: $normalizedPhone');
+      
+      final response = await _supabase
+          .from('admins')
+          .select()
+          .eq('phone', normalizedPhone)
+          .eq('pin', pin)
+          .single();
+
+      print('Response data: $response');
+
+      if (response == null) {
+        print('Aucun admin trouvé avec ces identifiants');
+        return false;
+      }
+
+      // Stocker les informations de l'admin
+      print('Données admin trouvées: $response');
+      
+      _currentUser = HoubagoUser(
+        id: response['id'],
+        firstName: response['first_name'],
+        lastName: response['last_name'],
+        phone: phone,
+        balance: 0,
+        createdAt: DateTime.parse(response['created_at']),
+      );
+      
+      print('Admin connecté avec succès:');
+      print('- Admin: ${_currentUser?.toJson()}');
+      
+      return true;
+    } catch (e, stackTrace) {
+      print('Erreur lors de la connexion admin: $e');
+      print('Stack trace: $stackTrace');
+      return false;
+    }
+  }
+
+  static Future<bool> checkIsAdmin() async {
+    try {
+      final admin = await _supabase
+          .from('admins')
+          .select()
+          .eq('phone', '0652262798')
+          .eq('pin', '0909')
+          .maybeSingle();
+
+      return admin != null;
+    } catch (e) {
+      print('Erreur lors de la vérification admin: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> isCurrentUserAdmin() async {
+    try {
+      if (_currentUser == null) return false;
+
+      final admin = await _supabase
+          .from('admins')
+          .select()
+          .eq('phone', _currentUser?.phone)
+          .eq('pin', '0909')
+          .maybeSingle();
+
+      return admin != null;
+    } catch (e) {
+      print('Erreur lors de la vérification admin: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> isCurrentUserSponsor() async {
+    // Tout le monde est sponsor
+    return true;
+  }
+
+  static Future<void> setCurrentUserAsSponsor() async {
+    // Ne rien faire, tout le monde est sponsor
+    return;
+  }
+
+  static Future<void> debugCheckTableStructure() async {
+    try {
+      print('\n=== Vérification de la structure de la table ===');
+      final result = await supabase.rpc('get_table_info', params: {'table_name': 'affiliates'});
+      print('Colonnes de la table affiliates:');
+      for (var column in result) {
+        print('${column['column_name']}: ${column['data_type']}');
+      }
+    } catch (e) {
+      print('Erreur lors de la vérification de la structure: $e');
+    }
+  }
+
+  static Future<bool> registerAffiliate({
+    required String firstname,
+    required String lastname,
+    required String phone,
+    required String photoUrl,
+    required String idCardUrl,
+  }) async {
+    try {
+      print('\n=== Enregistrement d\'un affilié ===');
+      print('Prénom: $firstname');
+      print('Nom: $lastname');
+      print('Téléphone: $phone');
+      print('Photo URL: $photoUrl');
+      print('ID Card URL: $idCardUrl');
+
+      // Vérifier la structure de la table avant l'insertion
+      await debugCheckTableStructure();
+
+      final response = await supabase.from('affiliates').insert({
+        'first_name': firstname,
+        'last_name': lastname,
+        'phone': phone,
+        'photo_identity_url': photoUrl,
+        'photo_license_url': idCardUrl,
+        'status': 'pending',
+        'driver_type': 'moto', // ou 'car' selon le type
+      }).select();
+
+      print('Réponse: $response');
+      return true;
+    } catch (e) {
+      print('Erreur lors de l\'enregistrement de l\'affilié: $e');
+      rethrow;
+    }
+  }
+
+  static Future<void> debugCheckPendingAffiliates() async {
+    try {
+      final response = await _supabase
+          .from('affiliates')
+          .select()
+          .eq('status', 'pending');
+      
+      print('Pending affiliates:');
+      print(response);
+      
+      // Vérifier aussi la table users pour les détails
+      if (response.isNotEmpty) {
+        for (var affiliate in response) {
+          final userId = affiliate['user_id'];
+          final user = await _supabase
+              .from('users')
+              .select()
+              .eq('id', userId)
+              .single();
+          print('User details for affiliate ${affiliate['id']}:');
+          print(user);
+        }
+      }
+    } catch (e, stackTrace) {
+      print('Error checking pending affiliates: $e');
+      print('Stack trace: $stackTrace');
+    }
+  }
+
+  static Stream<List<PendingAffiliate>> getAllAffiliatesAdmin() {
+    print('Récupération de tous les affiliés...');
+    return _supabase
+        .from('affiliates')
+        .stream(primaryKey: ['id'])
+        .order('created_at', ascending: false)
+        .map((data) {
+      print('Données reçues: ${data.length} affiliés');
+      return data.map((json) => PendingAffiliate.fromJson(json)).toList();
+    });
+  }
+
+  static Future<void> updateAffiliateStatusAdmin({
+    required String affiliateId,
+    required String status,
+  }) async {
+    try {
+      print('Début de updateAffiliateStatusAdmin - affiliateId: $affiliateId, status: $status');
+      
+      final currentAdmin = _currentUser;
+      if (currentAdmin == null) {
+        throw Exception('Admin non connecté');
+      }
+      print('Admin connecté: ${currentAdmin.id}');
+
+      // Vérifier que l'utilisateur est bien un admin
+      final isAdmin = await isCurrentUserAdmin();
+      print('Est admin: $isAdmin');
+      if (!isAdmin) {
+        throw Exception('Permissions insuffisantes : seuls les admins peuvent modifier le statut des affiliés');
+      }
+
+      // Mise à jour directe pour le moment
+      print('Mise à jour du statut...');
+      await _supabase
+          .from('affiliates')
+          .update({
+            'status': status,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', affiliateId);
+      print('Statut mis à jour avec succès');
+
+      // Récupérer les détails de l'affilié
+      print('Récupération des détails de l\'affilié...');
+      final affiliateData = await _supabase
+          .from('affiliates')
+          .select('*, users!affiliates_user_id_fkey(*)')
+          .eq('id', affiliateId)
+          .single();
+      print('Détails de l\'affilié récupérés: ${affiliateData['user_id']}');
+
+      // Créer une notification pour l'utilisateur
+      print('Création de la notification...');
+      await _supabase.from('notifications').insert({
+        'id': const Uuid().v4(),
+        'user_id': affiliateData['user_id'],
+        'title': 'Mise à jour de votre demande d\'affiliation',
+        'message': status == 'approved' 
+          ? 'Votre demande d\'affiliation a été approuvée !'
+          : status == 'rejected'
+            ? 'Votre demande d\'affiliation a été rejetée.'
+            : 'Votre demande d\'affiliation a été remise en attente.',
+        'type': 'affiliate_status',
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      print('Notification créée avec succès');
+
+    } catch (e, stackTrace) {
+      print('Erreur lors de la mise à jour du statut: $e');
+      print('Stack trace: $stackTrace');
+      rethrow;
+    }
+  }
+
+  static Stream<List<PendingAffiliate>> getPendingAffiliatesAdmin() {
+    try {
+      return Stream.fromFuture(_supabase
+          .from('affiliates')
+          .select()
+          .eq('status', 'pending')
+          .then((data) {
+            print('\n=== Données des affiliés reçues ===');
+            for (var json in data) {
+              print('\nAffilié:');
+              print('id: ${json['id']}');
+              print('user_id: ${json['user_id']}');
+              print('first_name: ${json['first_name']}');
+              print('last_name: ${json['last_name']}');
+              print('phone: ${json['phone']}');
+              print('status: ${json['status']}');
+              print('created_at: ${json['created_at']}');
+            }
+            return (data as List).map((json) => PendingAffiliate.fromJson(json)).toList();
+          }));
+    } catch (e) {
+      print('Erreur lors de la récupération des affiliés en attente: $e');
+      return Stream.value([]);
+    }
+  }
+
+  static Future<void> createSupportRequest({
+    required String subject,
+    required String message,
+    File? audioFile,
+    String? firstName,
+    String? lastName,
+    String? phone,
+  }) async {
+    try {
+      final requestId = const Uuid().v4();
+      String? audioUrl;
+      final now = DateTime.now().toIso8601String();
+
+      if (audioFile != null) {
+        final bytes = await audioFile.readAsBytes();
+        final storageResponse = await _supabase
+            .storage
+            .from('support_audio')
+            .uploadBinary(
+              '$requestId.m4a',
+              bytes,
+              fileOptions: const FileOptions(
+                contentType: 'audio/m4a',
+              ),
+            );
+        audioUrl = _supabase.storage
+            .from('support_audio')
+            .getPublicUrl('$requestId.m4a');
+      }
+
+      // Combine firstName et lastName seulement s'ils ne sont pas null
+      String? senderName;
+      if (firstName != null || lastName != null) {
+        senderName = [
+          if (firstName != null) firstName,
+          if (lastName != null) lastName,
+        ].join(' ').trim();
+        if (senderName.isEmpty) senderName = null;
+      }
+
+      await _supabase.from('support_requests').insert({
+        'id': requestId,
+        'sender_name': senderName,
+        'sender_phone': phone,
+        'subject': subject,
+        'message': message,
+        'status': 'pending',
+        'audio_url': audioUrl,
+        'created_at': now,
+        'updated_at': now,
+      });
+
+    } catch (e) {
+      print('Erreur lors de la création de la demande de support: $e');
+      rethrow;
+    }
+  }
+
+  static Future<List<SupportRequest>> getUserSupportRequests() async {
+    try {
+      final userId = await getCurrentUserId();
+      if (userId == null) throw Exception('Utilisateur non connecté');
+
+      final response = await _supabase
+          .from('support_requests')
+          .select()
+          .eq('user_id', userId)
+          .order('created_at', ascending: false);
+
+      return response
+          .map<SupportRequest>((json) => SupportRequest.fromJson(json))
+          .toList();
+    } catch (e) {
+      print('Erreur lors de la récupération des demandes de support: $e');
+      rethrow;
+    }
+  }
+
+  static Future<List<Affiliate>> getMyAffiliates() async {
+    try {
+      print('Récupération des affiliés...');
+      final user = _currentUser;
+      if (user == null) throw Exception('Utilisateur non connecté');
+
+      final response = await _supabase
+          .from('affiliates')
+          .select('*')
+          .eq('referrer_id', user.id)
+          .order('created_at', ascending: false);
+
+      print('Affiliés récupérés: ${response.length}');
+      return response.map((json) => Affiliate.fromJson(json)).toList();
+    } catch (e) {
+      print('Erreur lors de la récupération des affiliés: $e');
+      rethrow;
     }
   }
 }

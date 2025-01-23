@@ -9,7 +9,7 @@ enum AffiliateStatus {
 
 class Affiliate {
   final String id;
-  final String sponsorId;
+  final String referrerId;
   final String firstName;
   final String lastName;
   final String phone;
@@ -18,10 +18,11 @@ class Affiliate {
   final DateTime? lastRideDate;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final double totalEarnings;
 
   const Affiliate({
     required this.id,
-    required this.sponsorId,
+    required this.referrerId,
     required this.firstName,
     required this.lastName,
     required this.phone,
@@ -30,12 +31,13 @@ class Affiliate {
     this.lastRideDate,
     required this.createdAt,
     required this.updatedAt,
+    this.totalEarnings = 0,
   });
 
   factory Affiliate.fromJson(Map<String, dynamic> json) {
     return Affiliate(
       id: json['id'],
-      sponsorId: json['sponsor_id'],
+      referrerId: json['referrer_id'],
       firstName: json['firstname'],
       lastName: json['lastname'],
       phone: json['phone'],
@@ -46,6 +48,7 @@ class Affiliate {
           : null,
       createdAt: DateTime.parse(json['created_at']),
       updatedAt: DateTime.parse(json['updated_at']),
+      totalEarnings: (json['total_earnings'] as num?)?.toDouble() ?? 0.0,
     );
   }
 
@@ -67,4 +70,20 @@ class Affiliate {
   bool get isActive => status == AffiliateStatus.active;
   bool get isPending => status == AffiliateStatus.pending;
   bool get isInactive => status == AffiliateStatus.inactive;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'referrer_id': referrerId,
+      'firstname': firstName,
+      'lastname': lastName,
+      'phone': phone,
+      'yango_id': yangoId,
+      'status': status.label,
+      'last_ride_date': lastRideDate?.toIso8601String(),
+      'created_at': createdAt.toIso8601String(),
+      'updated_at': updatedAt.toIso8601String(),
+      'total_earnings': totalEarnings,
+    };
+  }
 }

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:houbago/houbago/database/database_service.dart';
-import 'package:houbago/houbago/models/user.dart';
+import 'package:houbago/houbago/models/houbago_user.dart';
 import 'package:houbago/houbago/screens/home/home_screen.dart';
 import 'package:houbago/houbago/houbago_theme.dart';
 
@@ -73,12 +73,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     try {
       await DatabaseService.registerUser(
-        firstName: _firstNameController.text.trim(),
-        lastName: _lastNameController.text.trim(),
+        firstname: _firstNameController.text.trim(),
+        lastname: _lastNameController.text.trim(),
         phone: _phoneController.text.trim(),
         pin: _pinController.text.trim(),
-        courseId: _selectedCourse!,
-        motoPartnerId: _selectedMotoPartner,
       );
 
       if (mounted) {
@@ -188,18 +186,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     );
                   }
                   
+
                   if (snapshot.hasError) {
                     print('Erreur courses: ${snapshot.error}');
                     return const Text('Erreur lors du chargement des partenaires course');
                   }
                   
+
                   final courses = snapshot.data ?? [];
                   print('Courses disponibles: $courses');
                   
+
                   if (courses.isEmpty) {
                     return const Text('Aucun partenaire course disponible');
                   }
                   
+
                   return DropdownButtonFormField<String>(
                     value: _selectedCourse,
                     decoration: const InputDecoration(
@@ -240,18 +242,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     );
                   }
                   
+
                   if (snapshot.hasError) {
                     print('Erreur moto: ${snapshot.error}');
                     return const Text('Erreur lors du chargement des partenaires moto');
                   }
                   
+
                   final partners = snapshot.data ?? [];
                   print('Partenaires moto disponibles: $partners');
                   
+
                   if (partners.isEmpty) {
                     return const Text('Aucun partenaire moto disponible');
                   }
                   
+
                   return DropdownButtonFormField<String>(
                     value: _selectedMotoPartner,
                     decoration: const InputDecoration(

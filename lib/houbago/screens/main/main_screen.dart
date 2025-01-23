@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:houbago/houbago/houbago_theme.dart';
 import 'package:houbago/houbago/screens/home/home_screen.dart';
-import 'package:houbago/houbago/screens/search/search_screen.dart';
+import 'package:houbago/houbago/screens/team/team_screen.dart';
 import 'package:houbago/houbago/screens/account/account_screen.dart';
 import 'package:houbago/houbago/screens/add/add_screen.dart';
 import 'package:houbago/houbago/screens/objectives/objectives_screen.dart';
@@ -19,7 +19,7 @@ class _MainScreenState extends State<MainScreen> {
 
   final List<Widget> _screens = [
     const HomeScreen(),
-    const SearchScreen(),
+    const TeamScreen(),
     const AddScreen(),
     const ObjectivesScreen(),
     const AccountScreen(),
