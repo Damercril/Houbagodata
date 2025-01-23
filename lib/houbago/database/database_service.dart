@@ -158,78 +158,76 @@ class DatabaseService {
 
   static Future<bool> signInWithPhone(String phone, String pin) async {
     try {
-      // Normaliser le numéro de téléphone
-      final normalizedPhone = _normalizePhoneNumber(phone);
-      
       print('\n=== Tentative de connexion ===');
-      print('Téléphone normalisé: $normalizedPhone');
+      print('Téléphone: $phone');
       print('PIN: $pin');
 
-      // Vérifier le contenu des tables
-      print('\n=== Contenu des tables ===');
-      final admins = await _supabase.from('admins').select();
-      final users = await _supabase.from('users').select();
-      print('Admins dans la base: $admins');
-      print('Users dans la base: $users');
+      // Normaliser le numéro de téléphone
+      final normalizedPhone = _normalizePhoneNumber(phone);
+      print('Numéro normalisé: $normalizedPhone');
 
-      // Essayer d'abord de se connecter en tant qu'admin
-      try {
-        print('\n=== Tentative connexion admin ===');
-        final adminResponse = await _supabase
-            .from('admins')
-            .select()
-            .eq('phone', normalizedPhone)
-            .eq('pin', pin)
-            .maybeSingle();
+      // Vérifier si l'utilisateur existe dans auth.users
+      final authUser = await _supabase.auth.signInWithPassword(
+        email: '$normalizedPhone@houbago.com',
+        password: pin,
+      );
 
-        print('Réponse admin: $adminResponse');
-
-        if (adminResponse != null) {
-          print('Admin trouvé: $adminResponse');
-          _currentUser = HoubagoUser(
-            id: adminResponse['id'],
-            firstName: adminResponse['first_name'] ?? 'Admin',
-            lastName: adminResponse['last_name'] ?? 'Houbago',
-            phone: normalizedPhone,
-            balance: 0,
-            createdAt: DateTime.parse(adminResponse['created_at']),
-          );
-          return true;
-        }
-      } catch (e) {
-        print('Erreur connexion admin: $e');
+      if (authUser.user == null) {
+        print('Échec de l\'authentification');
+        return false;
       }
 
-      // Si ce n'est pas un admin, essayer en tant qu'utilisateur
-      try {
-        print('\n=== Tentative connexion utilisateur ===');
-        final userResponse = await _supabase
-            .from('users')
-            .select()
-            .eq('phone', normalizedPhone)
-            .eq('pin', pin)
-            .maybeSingle();
+      print('Utilisateur authentifié: ${authUser.user!.id}');
 
-        print('Réponse utilisateur: $userResponse');
+      // Vérifier si l'utilisateur existe dans la table users
+      final userData = await _supabase
+          .from('users')
+          .select()
+          .eq('phone', normalizedPhone)
+          .single();
 
-        if (userResponse != null) {
-          print('Utilisateur trouvé: $userResponse');
-          _currentUser = HoubagoUser(
-            id: userResponse['id'],
-            firstName: userResponse['first_name'],
-            lastName: userResponse['last_name'],
-            phone: normalizedPhone,
-            balance: userResponse['balance'] ?? 0.0,
-            createdAt: DateTime.parse(userResponse['created_at']),
-          );
-          return true;
-        }
-      } catch (e) {
-        print('Erreur connexion utilisateur: $e');
+      if (userData == null) {
+        print('Création de l\'utilisateur dans la table users');
+        // Créer l'utilisateur dans la table users avec le même ID que auth.users
+        await _supabase.from('users').insert({
+          'id': authUser.user!.id,
+          'phone': normalizedPhone,
+          'first_name': 'Utilisateur',
+          'last_name': normalizedPhone,
+          'pin': pin,
+          'balance': 0,
+          'created_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        });
+
+        // Récupérer les données de l'utilisateur créé
+        final newUserData = await _supabase
+          .from('users')
+          .select()
+          .eq('id', authUser.user!.id)
+          .single();
+        
+        _currentUser = HoubagoUser(
+          id: newUserData['id'],
+          firstName: newUserData['first_name'],
+          lastName: newUserData['last_name'],
+          phone: normalizedPhone,
+          balance: newUserData['balance'] ?? 0,
+          createdAt: DateTime.parse(newUserData['created_at']),
+        );
+      } else {
+        _currentUser = HoubagoUser(
+          id: userData['id'],
+          firstName: userData['first_name'],
+          lastName: userData['last_name'],
+          phone: normalizedPhone,
+          balance: userData['balance'] ?? 0,
+          createdAt: DateTime.parse(userData['created_at']),
+        );
       }
 
-      print('Aucun utilisateur ou admin trouvé avec ces identifiants');
-      return false;
+      print('Utilisateur connecté avec succès: ${_currentUser?.id}');
+      return true;
     } catch (e) {
       print('Erreur lors de la connexion: $e');
       return false;
@@ -335,62 +333,44 @@ class DatabaseService {
     required String pin,
   }) async {
     try {
-      print('\n=== Inscription nouvel utilisateur ===');
+      print('\n=== Inscription d\'un nouvel utilisateur ===');
       print('Prénom: $firstname');
       print('Nom: $lastname');
       print('Téléphone: $phone');
 
-      // Vérifier si l'utilisateur existe déjà
-      final existingUsers = await _supabase
-          .from('users')
-          .select()
-          .eq('phone', phone);
-      
-      print('Utilisateurs existants avec ce numéro: ${existingUsers.length}');
-      
-      if (existingUsers.isNotEmpty) {
-        print('Un utilisateur existe déjà avec ce numéro');
+      final normalizedPhone = _normalizePhoneNumber(phone);
+      print('Téléphone normalisé: $normalizedPhone');
+
+      // Créer l'utilisateur dans auth.users
+      final authResponse = await _supabase.auth.signUp(
+        email: '$normalizedPhone@houbago.com',
+        password: pin,
+        phone: normalizedPhone,
+      );
+
+      if (authResponse.user == null) {
+        print('Échec de la création du compte auth');
         return false;
       }
 
-      final newUser = {
+      print('Compte auth créé: ${authResponse.user!.id}');
+
+      // Créer l'utilisateur dans la table users avec le même ID
+      await _supabase.from('users').insert({
+        'id': authResponse.user!.id,
         'first_name': firstname,
         'last_name': lastname,
-        'phone': phone,
+        'phone': normalizedPhone,
         'pin': pin,
+        'balance': 0,
         'created_at': DateTime.now().toIso8601String(),
         'updated_at': DateTime.now().toIso8601String(),
-      };
+      });
 
-      print('Données à insérer: $newUser');
-
-      final response = await _supabase
-          .from('users')
-          .insert(newUser)
-          .select()
-          .single();
-
-      print('Réponse inscription: $response');
-
-      if (response != null) {
-        _currentUser = HoubagoUser(
-          id: response['id'],
-          firstName: response['first_name'],
-          lastName: response['last_name'],
-          phone: phone,
-          balance: 0,
-          createdAt: DateTime.parse(response['created_at']),
-        );
-
-        print('Utilisateur créé: ${_currentUser?.toJson()}');
-        return true;
-      }
-
-      return false;
-    } catch (e, stackTrace) {
-      print('=== ERREUR lors de l\'inscription ===');
-      print('Message d\'erreur: $e');
-      print('Stack trace: $stackTrace');
+      print('Utilisateur créé avec succès');
+      return true;
+    } catch (e) {
+      print('Erreur lors de l\'inscription: $e');
       return false;
     }
   }
@@ -537,12 +517,16 @@ class DatabaseService {
         final response = await _supabase
             .from('users')
             .insert({
-              'firstname': 'John',
-              'lastname': 'Doe',
+              'first_name': 'John',
+              'last_name': 'Doe',
               'phone': '0123456789',
               'pin': '1234',
               'balance': 0.0,
               'created_at': DateTime.now().toIso8601String(),
+              'updated_at': DateTime.now().toIso8601String(),
+              'is_anonymous': false,
+              'raw_user_meta_data': {},
+              'raw_app_meta_data': {},
             })
             .select()
             .single();
@@ -551,6 +535,59 @@ class DatabaseService {
       } else {
         userId = testUser['id'];
         print('insertTestData - utilisateur existant avec id: $userId');
+      }
+
+      // Insérer des affiliés de test
+      final existingAffiliates = await _supabase
+          .from('affiliates')
+          .select()
+          .eq('referrer_id', userId);
+
+      if (existingAffiliates.isEmpty) {
+        print('insertTestData - création des affiliés de test');
+        final now = DateTime.now();
+        final affiliatesData = [
+          {
+            'referrer_id': userId,
+            'first_name': 'Pierre',
+            'last_name': 'Martin',
+            'phone': '0601020304',
+            'status': 'active',
+            'driver_type': 'moto',
+            'created_at': now.subtract(const Duration(days: 30)).toIso8601String(),
+            'updated_at': now.toIso8601String(),
+            'last_ride_date': now.subtract(const Duration(days: 2)).toIso8601String(),
+            'total_earnings': 1500.0,
+          },
+          {
+            'referrer_id': userId,
+            'first_name': 'Marie',
+            'last_name': 'Dubois',
+            'phone': '0602030405',
+            'status': 'pending',
+            'driver_type': 'moto',
+            'created_at': now.subtract(const Duration(days: 15)).toIso8601String(),
+            'updated_at': now.toIso8601String(),
+            'total_earnings': 0.0,
+          },
+          {
+            'referrer_id': userId,
+            'first_name': 'Jean',
+            'last_name': 'Dupont',
+            'phone': '0603040506',
+            'status': 'inactive',
+            'driver_type': 'moto',
+            'created_at': now.subtract(const Duration(days: 60)).toIso8601String(),
+            'updated_at': now.toIso8601String(),
+            'last_ride_date': now.subtract(const Duration(days: 45)).toIso8601String(),
+            'total_earnings': 750.0,
+          },
+        ];
+
+        await _supabase.from('affiliates').insert(affiliatesData);
+        print('insertTestData - affiliés de test créés');
+      } else {
+        print('insertTestData - les affiliés de test existent déjà');
       }
 
       // Insérer des gains de test pour les 7 derniers jours
@@ -1368,25 +1405,55 @@ class DatabaseService {
   }) async {
     try {
       print('\n=== Enregistrement d\'un affilié ===');
+      
+      final user = _currentUser;
+      if (user == null) {
+        throw Exception('Utilisateur non connecté');
+      }
+
+      print('Vérification de l\'utilisateur actuel:');
+      print('ID: ${user.id}');
+      print('Nom: ${user.firstName} ${user.lastName}');
+      print('Téléphone: ${user.phone}');
+
+      // Vérifier que l'utilisateur existe dans la base de données
+      final userExists = await _supabase
+          .from('users')
+          .select('id')
+          .eq('id', user.id)
+          .single();
+
+      if (userExists == null) {
+        print('L\'utilisateur n\'existe pas dans la base de données');
+        throw Exception('Utilisateur introuvable dans la base de données');
+      }
+
+      print('Utilisateur trouvé dans la base de données');
       print('Prénom: $firstname');
       print('Nom: $lastname');
       print('Téléphone: $phone');
       print('Photo URL: $photoUrl');
       print('ID Card URL: $idCardUrl');
+      print('Référent ID: ${user.id}');
 
       // Vérifier la structure de la table avant l'insertion
       await debugCheckTableStructure();
 
-      final response = await supabase.from('affiliates').insert({
+      final response = await _supabase.from('affiliates').insert({
         'first_name': firstname,
         'last_name': lastname,
         'phone': phone,
         'photo_identity_url': photoUrl,
         'photo_license_url': idCardUrl,
         'status': 'pending',
-        'driver_type': 'moto', // ou 'car' selon le type
+        'driver_type': 'moto',
+        'referrer_id': user.id,
+        'created_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+        'total_earnings': 0,
       }).select();
 
+      print('Affilié enregistré avec succès');
       print('Réponse: $response');
       return true;
     } catch (e) {
@@ -1609,16 +1676,24 @@ class DatabaseService {
       final user = _currentUser;
       if (user == null) throw Exception('Utilisateur non connecté');
 
+      print('User ID: ${user.id}');
       final response = await _supabase
           .from('affiliates')
           .select('*')
           .eq('referrer_id', user.id)
           .order('created_at', ascending: false);
 
+      print('Réponse brute: $response');
       print('Affiliés récupérés: ${response.length}');
-      return response.map((json) => Affiliate.fromJson(json)).toList();
+      
+      final affiliates = (response as List<dynamic>)
+          .map<Affiliate>((json) => Affiliate.fromJson(json))
+          .toList();
+      print('Affiliés convertis: ${affiliates.length}');
+      return affiliates;
     } catch (e) {
       print('Erreur lors de la récupération des affiliés: $e');
+      print('Stack trace: ${StackTrace.current}');
       rethrow;
     }
   }

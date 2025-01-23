@@ -10,10 +10,13 @@ enum AffiliateStatus {
 class Affiliate {
   final String id;
   final String referrerId;
+  final String? userId;
   final String firstName;
   final String lastName;
   final String phone;
-  final String? yangoId;
+  final String? driverType;
+  final String? photoIdentityUrl;
+  final String? photoLicenseUrl;
   final AffiliateStatus status;
   final DateTime? lastRideDate;
   final DateTime createdAt;
@@ -23,10 +26,13 @@ class Affiliate {
   const Affiliate({
     required this.id,
     required this.referrerId,
+    this.userId,
     required this.firstName,
     required this.lastName,
     required this.phone,
-    this.yangoId,
+    this.driverType,
+    this.photoIdentityUrl,
+    this.photoLicenseUrl,
     required this.status,
     this.lastRideDate,
     required this.createdAt,
@@ -38,10 +44,13 @@ class Affiliate {
     return Affiliate(
       id: json['id'],
       referrerId: json['referrer_id'],
-      firstName: json['firstname'],
-      lastName: json['lastname'],
+      userId: json['user_id'],
+      firstName: json['first_name'],
+      lastName: json['last_name'],
       phone: json['phone'],
-      yangoId: json['yango_id'],
+      driverType: json['driver_type'],
+      photoIdentityUrl: json['photo_identity_url'],
+      photoLicenseUrl: json['photo_license_url'],
       status: _statusFromString(json['status']),
       lastRideDate: json['last_ride_date'] != null 
           ? DateTime.parse(json['last_ride_date']) 
@@ -65,20 +74,17 @@ class Affiliate {
     }
   }
 
-  String get fullName => '$firstName $lastName';
-
-  bool get isActive => status == AffiliateStatus.active;
-  bool get isPending => status == AffiliateStatus.pending;
-  bool get isInactive => status == AffiliateStatus.inactive;
-
   Map<String, dynamic> toJson() {
     return {
       'id': id,
       'referrer_id': referrerId,
-      'firstname': firstName,
-      'lastname': lastName,
+      'user_id': userId,
+      'first_name': firstName,
+      'last_name': lastName,
       'phone': phone,
-      'yango_id': yangoId,
+      'driver_type': driverType,
+      'photo_identity_url': photoIdentityUrl,
+      'photo_license_url': photoLicenseUrl,
       'status': status.label,
       'last_ride_date': lastRideDate?.toIso8601String(),
       'created_at': createdAt.toIso8601String(),
@@ -86,4 +92,10 @@ class Affiliate {
       'total_earnings': totalEarnings,
     };
   }
+
+  String get fullName => '$firstName $lastName';
+
+  bool get isActive => status == AffiliateStatus.active;
+  bool get isPending => status == AffiliateStatus.pending;
+  bool get isInactive => status == AffiliateStatus.inactive;
 }

@@ -10,27 +10,34 @@ class TeamScreen extends StatefulWidget {
   State<TeamScreen> createState() => _TeamScreenState();
 }
 
-class _TeamScreenState extends State<TeamScreen> {
-  List<Affiliate> _affiliates = [];
-  final _currencyFormat = NumberFormat.currency(locale: 'fr_FR', symbol: '€');
+class _TeamScreenState extends State<TeamScreen> with AutomaticKeepAliveClientMixin {
+  late Future<List<Affiliate>> _affiliatesFuture;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
-    _loadAffiliates();
+    _affiliatesFuture = _loadAffiliates();
   }
 
-  Future<void> _loadAffiliates() async {
+  Future<List<Affiliate>> _loadAffiliates() async {
     try {
-      final affiliates = await DatabaseService.getMyAffiliates();
-      setState(() => _affiliates = affiliates);
+      // Pour le développement, créer des données de test
+      await DatabaseService.insertTestData();
+      
+      return await DatabaseService.getMyAffiliates();
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Erreur lors du chargement des affiliés')),
-        );
-      }
+      print('Erreur lors du chargement des affiliés: $e');
+      rethrow;
     }
+  }
+
+  void _refreshAffiliates() {
+    setState(() {
+      _affiliatesFuture = _loadAffiliates();
+    });
   }
 
   String _formatLastRideDate(DateTime? date) {
@@ -49,29 +56,170 @@ class _TeamScreenState extends State<TeamScreen> {
     }
   }
 
+  Widget _buildAffiliateList(List<Affiliate> affiliates) {
+    if (affiliates.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(16.0),
+          child: Text(
+            'Aucun affilié trouvé',
+            style: TextStyle(fontSize: 16),
+          ),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        _refreshAffiliates();
+      },
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(8),
+        itemCount: affiliates.length,
+        itemBuilder: (context, index) {
+          final affiliate = affiliates[index];
+          return Card(
+            elevation: 2,
+            margin: const EdgeInsets.symmetric(vertical: 4),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${affiliate.firstName} ${affiliate.lastName}',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _buildInfoRow(
+                    'Statut',
+                    _getStatusText(affiliate.status),
+                    _getStatusColor(affiliate.status),
+                  ),
+                  _buildInfoRow(
+                    'Dernière course',
+                    _formatLastRideDate(affiliate.lastRideDate),
+                    Colors.black87,
+                  ),
+                  _buildInfoRow(
+                    'Gains',
+                    NumberFormat.currency(locale: 'fr_FR', symbol: '€')
+                        .format(affiliate.totalEarnings),
+                    Colors.green,
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value, Color valueColor) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Text(
+            '$label: ',
+            style: const TextStyle(
+              color: Colors.black54,
+              fontSize: 14,
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              color: valueColor,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getStatusColor(AffiliateStatus status) {
+    switch (status) {
+      case AffiliateStatus.active:
+        return Colors.green;
+      case AffiliateStatus.pending:
+        return Colors.orange;
+      case AffiliateStatus.inactive:
+        return Colors.red;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+    
     return Scaffold(
-      appBar: AppBar(title: const Text('Mon équipe')),
-      body: _affiliates.isEmpty
-          ? const Center(child: CircularProgressIndicator())
-          : ListView.builder(
-              itemCount: _affiliates.length,
-              itemBuilder: (context, index) {
-                final affiliate = _affiliates[index];
-                return ListTile(
-                  title: Text('${affiliate.firstName} ${affiliate.lastName}'),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Statut: ${_getStatusText(affiliate.status)}'),
-                      Text('Dernière course: ${_formatLastRideDate(affiliate.lastRideDate)}'),
-                      Text('Gains: ${_currencyFormat.format(affiliate.totalEarnings)}'),
-                    ],
-                  ),
-                );
-              },
-            ),
+      appBar: AppBar(
+        title: const Text('Mon équipe'),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _refreshAffiliates,
+          ),
+        ],
+      ),
+      body: FutureBuilder<List<Affiliate>>(
+        future: _affiliatesFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.error_outline,
+                      size: 48,
+                      color: Colors.red,
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Erreur lors du chargement des affiliés',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 16),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      snapshot.error.toString(),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Colors.red,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: _refreshAffiliates,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Réessayer'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          return _buildAffiliateList(snapshot.data ?? []);
+        },
+      ),
     );
   }
 }
